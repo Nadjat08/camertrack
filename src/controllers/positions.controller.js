@@ -1,0 +1,100 @@
+const pool = require('../config/db');
+
+// POST /api/positions — Envoyer sa position (membre actif)
+const envoyerPosition = async (req, res) => {
+  const { latitude, longitude, precision } = req.body;
+  const user_id = req.user.user_id;
+
+  if (!latitude || !longitude) {
+    return res.status(400).json({ message: 'Latitude et longitude obligatoires.' });
+  }
+
+  try {
+    // Enregistrer la position
+    await pool.query(
+      `INSERT INTO positions (source_type, source_id, latitude, longitude, precision_m)
+       VALUES ('user', $1, $2, $3, $4)`,
+      [user_id, latitude, longitude, precision || 10]
+    );
+
+    // Récupérer les groupes de l'utilisateur pour diffuser via Socket.io
+    const groupesResult = await pool.query(
+      `SELECT group_id FROM membres_groupe
+       WHERE user_id = $1 AND actif = true`,
+      [user_id]
+    );
+
+    // Récupérer les infos de l'utilisateur
+    const userResult = await pool.query(
+      `SELECT user_id, nom, prenom FROM users WHERE user_id = $1`,
+      [user_id]
+    );
+
+    const user = userResult.rows[0];
+    const groupes = groupesResult.rows;
+
+    // Diffuser la position dans toutes les rooms des groupes
+    // via l'objet io attaché à req (à configurer dans server.js)
+    if (req.io) {
+      groupes.forEach(({ group_id }) => {
+        req.io.to(`groupe_${group_id}`).emit('position_mise_a_jour', {
+          user_id: user.user_id,
+          nom: user.nom,
+          prenom: user.prenom,
+          latitude,
+          longitude,
+          precision_m: precision || 10,
+          timestamp: new Date().toISOString(),
+          source_type: 'user',
+          group_id
+        });
+      });
+    }
+
+    res.status(200).json({ message: 'Position enregistrée.' });
+
+  } catch (err) {
+    console.error('Erreur envoyerPosition :', err);
+    res.status(500).json({ message: 'Erreur serveur.' });
+  }
+};
+
+// GET /api/positions/membres — Dernières positions de tous les membres
+const getPositionsMembres = async (req, res) => {
+  const user_id = req.user.user_id;
+
+  try {
+    // Récupérer les dernières positions de tous les membres
+    // des groupes auxquels appartient l'utilisateur connecté
+    const result = await pool.query(
+      `SELECT DISTINCT ON (p.source_id, p.source_type)
+              u.user_id, u.nom, u.prenom,
+              p.latitude, p.longitude, p.precision_m, p.timestamp,
+              mg.role, g.group_id, g.nom_grp,
+              CASE
+                WHEN p.timestamp > NOW() - INTERVAL '15 minutes' THEN true
+                ELSE false
+              END AS en_ligne
+       FROM positions p
+       INNER JOIN users u ON u.user_id = p.source_id
+       INNER JOIN membres_groupe mg ON mg.user_id = u.user_id
+       INNER JOIN groupes g ON g.group_id = mg.group_id
+       INNER JOIN membres_groupe mg2 ON mg2.group_id = g.group_id
+                                    AND mg2.user_id = $1
+                                    AND mg2.actif = true
+       WHERE p.source_type = 'user'
+         AND p.source_id != $1
+         AND mg.actif = true
+       ORDER BY p.source_id, p.source_type, p.timestamp DESC`,
+      [user_id]
+    );
+
+    res.status(200).json({ membres: result.rows });
+
+  } catch (err) {
+    console.error('Erreur getPositionsMembres :', err);
+    res.status(500).json({ message: 'Erreur serveur.' });
+  }
+};
+
+module.exports = { envoyerPosition, getPositionsMembres };
