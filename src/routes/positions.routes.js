@@ -1,8 +1,12 @@
 const express = require('express');
 const router = express.Router();
+const verifierToken = require('../middleware/auth');
+const {
+  envoyerPosition,
+  getPositionsMembres
+} = require('../controllers/positions.controller');
 
-router.post('/', (req, res) => {
-  res.json({ message: 'POST position — à implémenter' });
-});
+router.post('/', verifierToken, envoyerPosition);
+router.get('/membres', verifierToken, getPositionsMembres);
 
 module.exports = router;
