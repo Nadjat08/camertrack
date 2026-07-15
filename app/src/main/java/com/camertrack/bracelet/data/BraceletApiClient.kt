@@ -115,7 +115,7 @@ object BraceletApiClient {
                 put("id", System.currentTimeMillis().toString())
                 put("latitude", latitude)
                 put("longitude", longitude)
-                put("accuracy", precision)
+                put("accuracy", precision.toDouble())
                 put("timestamp", java.time.Instant.now().toString())
             }
             val corps = "[$position]".toRequestBody(JSON)
@@ -157,7 +157,7 @@ object BraceletApiClient {
                 put("id", System.currentTimeMillis().toString())
                 put("latitude", latitude)
                 put("longitude", longitude)
-                put("accuracy", precision)
+                put("accuracy", precision.toDouble())
                 put("timestamp", java.time.Instant.now().toString())
                 put("severity", severity)
             }
