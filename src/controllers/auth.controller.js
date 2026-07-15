@@ -2,6 +2,7 @@ const pool = require('../config/db');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
+const logger = require('../utils/logger');
 
 // POST /api/auth/register
 const register = async (req, res) => {
@@ -9,6 +10,7 @@ const register = async (req, res) => {
 
   // Validation des champs obligatoires
   if (!nom || !email || !telephone || !password) {
+    logger.warn('Register failed: missing fields', { body: { email, telephone } });
     return res.status(400).json({ message: 'Tous les champs sont obligatoires.' });
   }
 
@@ -19,6 +21,7 @@ const register = async (req, res) => {
       [email, telephone]
     );
     if (exist.rows.length > 0) {
+      logger.warn('Register failed: duplicate user', { email, telephone });
       return res.status(409).json({ message: 'Email ou téléphone déjà utilisé.' });
     }
 
@@ -33,13 +36,14 @@ const register = async (req, res) => {
       [nom, prenom, email, telephone, hashedPassword]
     );
 
+    logger.info('User registered', { userId: result.rows[0].user_id, email });
     res.status(201).json({
       message: 'Compte créé avec succès.',
       user: result.rows[0]
     });
 
   } catch (err) {
-    console.error('Erreur register :', err);
+    logger.error('Register failed', { error: err.message, stack: err.stack, email, telephone });
     res.status(500).json({ message: 'Erreur serveur.' });
   }
 };
@@ -49,6 +53,7 @@ const login = async (req, res) => {
   const { email, password } = req.body;
 
   if (!email || !password) {
+    logger.warn('Login failed: missing credentials', { email });
     return res.status(400).json({ message: 'Email et mot de passe obligatoires.' });
   }
 
@@ -60,6 +65,7 @@ const login = async (req, res) => {
     );
 
     if (result.rows.length === 0) {
+      logger.warn('Login failed: user not found', { email });
       return res.status(401).json({ message: 'Identifiants incorrects.' });
     }
 
@@ -68,6 +74,7 @@ const login = async (req, res) => {
     // Vérifier le mot de passe
     const validPassword = await bcrypt.compare(password, user.password);
     if (!validPassword) {
+      logger.warn('Login failed: invalid password', { userId: user.user_id, email });
       return res.status(401).json({ message: 'Identifiants incorrects.' });
     }
 
@@ -78,6 +85,7 @@ const login = async (req, res) => {
       { expiresIn: '24h' }
     );
 
+    logger.info('User logged in', { userId: user.user_id, email });
     res.status(200).json({
       message: 'Connexion réussie.',
       token,
@@ -91,7 +99,7 @@ const login = async (req, res) => {
     });
 
   } catch (err) {
-    console.error('Erreur login :', err);
+    logger.error('Login failed', { error: err.message, stack: err.stack, email });
     res.status(500).json({ message: 'Erreur serveur.' });
   }
 };
@@ -103,6 +111,7 @@ const refreshToken = async (req, res) => {
   const { refreshToken: token } = req.body;
 
   if (!token) {
+    logger.warn('Refresh token failed: missing token');
     return res.status(400).json({ message: 'Refresh token obligatoire.' });
   }
 
@@ -114,6 +123,7 @@ const refreshToken = async (req, res) => {
     );
 
     if (result.rows.length === 0) {
+      logger.warn('Refresh token failed: unknown token');
       return res.status(401).json({ message: 'Refresh token invalide.' });
     }
 
@@ -139,12 +149,13 @@ const refreshToken = async (req, res) => {
       [newRefreshToken, bracelet.id_bracelet]
     );
 
+    logger.info('Bracelet token refreshed', { braceletId: bracelet.id_bracelet });
     res.status(200).json({
       accessToken: newAccessToken,
       refreshToken: newRefreshToken
     });
   } catch (err) {
-    console.error('Erreur refreshToken :', err);
+    logger.error('Refresh token failed', { error: err.message, stack: err.stack });
     res.status(500).json({ message: 'Erreur serveur.' });
   }
 };

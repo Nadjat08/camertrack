@@ -1,4 +1,5 @@
 const pool = require('../config/db');
+const logger = require('../utils/logger');
 
 // POST /api/positions — Envoyer sa position (membre actif)
 const envoyerPosition = async (req, res) => {
@@ -6,6 +7,7 @@ const envoyerPosition = async (req, res) => {
   const user_id = req.user.user_id;
 
   if (!latitude || !longitude) {
+    logger.warn('Position submission rejected: missing coordinates', { userId: user_id });
     return res.status(400).json({ message: 'Latitude et longitude obligatoires.' });
   }
 
@@ -46,15 +48,17 @@ const envoyerPosition = async (req, res) => {
           precision_m: precision || 10,
           timestamp: new Date().toISOString(),
           source_type: 'user',
-          group_id
+          group_id,
+          role: 'membre'
         });
       });
     }
 
+    logger.info('Position stored', { userId: user_id, latitude, longitude, precision: precision || 10 });
     res.status(200).json({ message: 'Position enregistrée.' });
 
   } catch (err) {
-    console.error('Erreur envoyerPosition :', err);
+    logger.error('Position submission failed', { error: err.message, stack: err.stack, userId: user_id });
     res.status(500).json({ message: 'Erreur serveur.' });
   }
 };
