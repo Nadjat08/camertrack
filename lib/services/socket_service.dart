@@ -7,10 +7,7 @@ class SocketService {
   static Socket get socket {
     _socket ??= io(
       ApiConfig.socketBaseUrl,
-      OptionBuilder()
-          .setTransports(['websocket'])
-          .disableAutoConnect()
-          .build(),
+      OptionBuilder().setTransports(['websocket']).disableAutoConnect().build(),
     );
     return _socket!;
   }
