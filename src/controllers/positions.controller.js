@@ -34,7 +34,7 @@ const envoyerPosition = async (req, res) => {
     const groupes = groupesResult.rows;
 
     // Diffuser la position dans toutes les rooms des groupes
-    // via l'objet io attaché à req (à configurer dans server.js)
+    // via l'objet io attaché à req
     if (req.io) {
       groupes.forEach(({ group_id }) => {
         req.io.to(`groupe_${group_id}`).emit('position_mise_a_jour', {
@@ -59,14 +59,13 @@ const envoyerPosition = async (req, res) => {
   }
 };
 
-// GET /api/positions/membres — Dernières positions de tous les membres
+// GET /api/positions/membres — Dernières positions de tous les membres (humains + bracelets)
 const getPositionsMembres = async (req, res) => {
   const user_id = req.user.user_id;
 
   try {
-    // Récupérer les dernières positions de tous les membres
-    // des groupes auxquels appartient l'utilisateur connecté
-    const result = await pool.query(
+    // Dernières positions des membres humains des groupes de l'utilisateur
+    const membresHumains = await pool.query(
       `SELECT DISTINCT ON (p.source_id, p.source_type)
               u.user_id, u.nom, u.prenom,
               p.latitude, p.longitude, p.precision_m, p.timestamp,
@@ -89,7 +88,32 @@ const getPositionsMembres = async (req, res) => {
       [user_id]
     );
 
-    res.status(200).json({ membres: result.rows });
+    // Dernières positions des bracelets rattachés aux groupes de l'utilisateur.
+    // Rattachement via bracelets.group_id (pas via membres_groupe, voir choix de conception).
+    // role = 'enfant' sert de marqueur pour que l'app distingue un bracelet d'un membre humain.
+    const bracelets = await pool.query(
+      `SELECT DISTINCT ON (p.source_id)
+              b.id_bracelet AS user_id, b.nom_enfant AS nom, b.prenom_enfant AS prenom,
+              p.latitude, p.longitude, p.precision_m, p.timestamp,
+              'enfant' AS role, g.group_id, g.nom_grp,
+              CASE
+                WHEN p.timestamp > NOW() - INTERVAL '15 minutes' THEN true
+                ELSE false
+              END AS en_ligne
+       FROM positions p
+       INNER JOIN bracelets b ON b.id_bracelet = p.source_id AND p.source_type = 'bracelet'
+       INNER JOIN groupes g ON g.group_id = b.group_id
+       INNER JOIN membres_groupe mg2 ON mg2.group_id = b.group_id
+                                     AND mg2.user_id = $1
+                                     AND mg2.actif = true
+       WHERE b.group_id IS NOT NULL
+       ORDER BY p.source_id, p.timestamp DESC`,
+      [user_id]
+    );
+
+    res.status(200).json({
+      membres: [...membresHumains.rows, ...bracelets.rows]
+    });
 
   } catch (err) {
     console.error('Erreur getPositionsMembres :', err);

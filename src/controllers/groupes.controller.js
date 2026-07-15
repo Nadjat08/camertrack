@@ -28,7 +28,7 @@ const creerGroupe = async (req, res) => {
     );
 
     res.status(201).json({
-      message: 'Groupe cV/réé avec succès.',
+      message: 'Groupe créé avec succès.',
       groupe
     });
 
@@ -68,7 +68,7 @@ const listerGroupes = async (req, res) => {
   }
 };
 
-// GET /api/groupes/:id — Détail d'un groupe
+// GET /api/groupes/:id — Détail d'un groupe (membres humains + bracelets rattachés)
 const detailGroupe = async (req, res) => {
   const { id } = req.params;
   const user_id = req.user.user_id;
@@ -85,14 +85,15 @@ const detailGroupe = async (req, res) => {
       return res.status(403).json({ message: 'Accès refusé.' });
     }
 
-    // Récupérer les infos du groupe + membres
+    // Récupérer les infos du groupe
     const groupe = await pool.query(
       `SELECT g.group_id, g.nom_grp, g.admin_id, g.date_creation
        FROM groupes g WHERE g.group_id = $1`,
       [id]
     );
 
-    const membres = await pool.query(
+    // Membres humains du groupe
+    const membresHumains = await pool.query(
       `SELECT u.user_id, u.nom, u.prenom, u.telephone, mg.role, mg.date_ajout
        FROM membres_groupe mg
        INNER JOIN users u ON u.user_id = mg.user_id
@@ -101,9 +102,41 @@ const detailGroupe = async (req, res) => {
       [id]
     );
 
+    // Bracelets rattachés au groupe (rattachement géré via bracelets.group_id,
+    // pas via membres_groupe)
+    const bracelets = await pool.query(
+      `SELECT id_bracelet, nom_enfant, prenom_enfant
+       FROM bracelets
+       WHERE group_id = $1 AND statut = true`,
+      [id]
+    );
+
+    // Fusion des deux listes dans un format unifié, consommable directement
+    // par l'app Flutter (mêmes noms de champs pour les deux types).
+    const membresFusionnes = [
+      ...membresHumains.rows.map((m) => ({
+        type: 'user',
+        user_id: m.user_id,
+        nom: m.nom,
+        prenom: m.prenom,
+        telephone: m.telephone,
+        role: m.role,
+        date_ajout: m.date_ajout,
+      })),
+      ...bracelets.rows.map((b) => ({
+        type: 'bracelet',
+        bracelet_id: b.id_bracelet,
+        nom: b.nom_enfant,
+        prenom: b.prenom_enfant,
+        telephone: null,
+        role: 'enfant',
+        date_ajout: null,
+      })),
+    ];
+
     res.status(200).json({
       groupe: groupe.rows[0],
-      membres: membres.rows
+      membres: membresFusionnes,
     });
 
   } catch (err) {

@@ -1,4 +1,6 @@
 const pool = require('../config/db');
+const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 
 // POST /api/groupes/:id/bracelets — Associer un bracelet au groupe
 const ajouterBracelet = async (req, res) => {
@@ -22,7 +24,7 @@ const ajouterBracelet = async (req, res) => {
       return res.status(403).json({ message: 'Seul l\'administrateur peut ajouter un bracelet.' });
     }
 
-    // Vérifier que le bracelet existe (créé à la fabrication)
+    // Vérifier que le bracelet existe (enregistré par la montre au premier lancement)
     const braceletResult = await pool.query(
       `SELECT * FROM bracelets WHERE identifiant_unique = $1`,
       [identifiant_unique]
@@ -102,4 +104,92 @@ const verifierBracelet = async (req, res) => {
   }
 };
 
-module.exports = { ajouterBracelet, verifierBracelet };
+// POST /api/bracelets/enregistrer — Provisioning de la montre (UPSERT)
+const enregistrerBracelet = async (req, res) => {
+  const { identifiant_unique } = req.body;
+
+  if (!identifiant_unique) {
+    return res.status(400).json({ message: 'Identifiant unique obligatoire.' });
+  }
+
+  try {
+    const result = await pool.query(
+      `SELECT id_bracelet FROM bracelets WHERE identifiant_unique = $1`,
+      [identifiant_unique]
+    );
+
+    if (result.rows.length > 0) {
+      return res.status(200).json({ bracelet_id: result.rows[0].id_bracelet });
+    } else {
+      const insertResult = await pool.query(
+        `INSERT INTO bracelets (identifiant_unique)
+         VALUES ($1) RETURNING id_bracelet`,
+        [identifiant_unique]
+      );
+      return res.status(201).json({ bracelet_id: insertResult.rows[0].id_bracelet });
+    }
+  } catch (err) {
+    console.error('Erreur enregistrerBracelet :', err);
+    res.status(500).json({ message: 'Erreur serveur.' });
+  }
+};
+
+// GET /api/bracelets/status/:identifiant — Polling de la montre
+const statutBracelet = async (req, res) => {
+  const { identifiant } = req.params;
+
+  try {
+    const result = await pool.query(
+      `SELECT id_bracelet, identifiant_unique, group_id, provisioned
+       FROM bracelets WHERE identifiant_unique = $1`,
+      [identifiant]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Bracelet introuvable.' });
+    }
+
+    const bracelet = result.rows[0];
+
+    if (!bracelet.group_id) {
+      return res.status(200).json({ status: 'WAITING' });
+    }
+
+    if (bracelet.provisioned) {
+      return res.status(200).json({ status: 'PROVISIONED' });
+    }
+
+    const accessToken = jwt.sign(
+      {
+        bracelet_id: bracelet.id_bracelet,
+        identifiant_unique: bracelet.identifiant_unique,
+        group_id: bracelet.group_id,
+        role: 'bracelet'
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
+    const refreshToken = crypto.randomBytes(40).toString('hex');
+
+    
+    // au lieu de créer une nouvelle colonne refresh_token.
+    await pool.query(
+      `UPDATE bracelets
+       SET provisioned = true, token_auth = $1
+       WHERE id_bracelet = $2`,
+      [refreshToken, bracelet.id_bracelet]
+    );
+
+    return res.status(200).json({
+      status: 'ASSOCIATED',
+      accessToken,
+      refreshToken
+    });
+  } catch (err) {
+    console.error('Erreur statutBracelet :', err);
+    res.status(500).json({ message: 'Erreur serveur.' });
+  }
+};
+
+module.exports = { ajouterBracelet, verifierBracelet, enregistrerBracelet, statutBracelet };

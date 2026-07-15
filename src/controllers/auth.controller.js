@@ -1,6 +1,7 @@
 const pool = require('../config/db');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 
 // POST /api/auth/register
 const register = async (req, res) => {
@@ -95,4 +96,57 @@ const login = async (req, res) => {
   }
 };
 
-module.exports = { register, login };
+// POST /api/auth/refresh — Renouvellement du token du bracelet
+// Le refreshToken opaque est cherché puis remplacé (rotation) dans la colonne
+// token_auth de la table bracelets, au lieu d'une colonne refresh_token séparée.
+const refreshToken = async (req, res) => {
+  const { refreshToken: token } = req.body;
+
+  if (!token) {
+    return res.status(400).json({ message: 'Refresh token obligatoire.' });
+  }
+
+  try {
+    const result = await pool.query(
+      `SELECT id_bracelet, identifiant_unique, group_id 
+       FROM bracelets WHERE token_auth = $1`,
+      [token]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(401).json({ message: 'Refresh token invalide.' });
+    }
+
+    const bracelet = result.rows[0];
+
+    const newAccessToken = jwt.sign(
+      {
+        bracelet_id: bracelet.id_bracelet,
+        identifiant_unique: bracelet.identifiant_unique,
+        group_id: bracelet.group_id,
+        role: 'bracelet'
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
+    const newRefreshToken = crypto.randomBytes(40).toString('hex');
+
+    await pool.query(
+      `UPDATE bracelets
+       SET token_auth = $1
+       WHERE id_bracelet = $2`,
+      [newRefreshToken, bracelet.id_bracelet]
+    );
+
+    res.status(200).json({
+      accessToken: newAccessToken,
+      refreshToken: newRefreshToken
+    });
+  } catch (err) {
+    console.error('Erreur refreshToken :', err);
+    res.status(500).json({ message: 'Erreur serveur.' });
+  }
+};
+
+module.exports = { register, login, refreshToken };
