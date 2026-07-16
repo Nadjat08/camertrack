@@ -564,8 +564,13 @@ class _DetailGroupeScreenState extends State<DetailGroupeScreen> {
 
   Widget _buildCarteMembre(Map<String, dynamic> membre) {
     final estAdmin = membre['role'] == 'admin';
+    // Un bracelet (role 'enfant') n'a ni téléphone ni, parfois, nom/prénom complets :
+    // on sécurise l'accès pour éviter un crash "Null is not a subtype of String".
+    final prenom = (membre['prenom'] ?? '').toString();
+    final nom = (membre['nom'] ?? '').toString();
     final initiales =
-    '${membre['prenom'][0]}${membre['nom'][0]}'.toUpperCase();
+        '${prenom.isNotEmpty ? prenom[0] : ''}${nom.isNotEmpty ? nom[0] : ''}'
+            .toUpperCase();
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -611,7 +616,7 @@ class _DetailGroupeScreenState extends State<DetailGroupeScreen> {
                   ),
                 ),
                 Text(
-                  membre['telephone'],
+                  membre['telephone'] ?? (membre['role'] == 'enfant' ? 'Bracelet enfant' : ''),
                   style: const TextStyle(
                     color: Color(0xFF757575),
                     fontFamily: 'Poppins',
